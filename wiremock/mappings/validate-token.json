@@ -1,0 +1,29 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "/auth/validate",
+    "headers": {
+      "Authorization": {
+        "matches": "Bearer .*"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "X-Auth-User": "admin",
+      "X-Auth-Email": "admin@example.com",
+      "X-Auth-Role": "admin",
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "valid": true,
+      "user": {
+        "id": "1",
+        "username": "admin",
+        "email": "admin@example.com",
+        "role": "admin"
+      }
+    }
+  }
+}

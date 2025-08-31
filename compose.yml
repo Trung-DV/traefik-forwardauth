@@ -1,0 +1,60 @@
+name: traefik
+services:
+  traefik:
+    image: traefik
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:z
+    labels:
+      - dev.orbstack.domains=*.traefik.local
+
+      - traefik.http.services.traefik.loadbalancer.server.port=443
+      - traefik.http.routers.traefik.rule=Host(`traefik.local`)
+      - traefik.http.routers.traefik.service=api@internal
+      - traefik.http.routers.traefik.tls
+    command:
+      - --api.dashboard=true
+      - --api.insecure=true
+
+      - --entrypoints.http.address=:80
+      - --entrypoints.http.http.redirections.entrypoint.to=https
+      - --entrypoints.https.address=:443
+
+      - --providers.docker.defaultRule=Host(`{{ index .Labels "com.docker.compose.service"}}.{{ index .Labels "com.docker.compose.project"}}.traefik.local`) # work
+      - --providers.docker.exposedByDefault=true
+
+      - --log.level=TRACE
+      - --accesslog.filepath=/var/log/traefik/access.log
+      - --accesslog.format=json
+      - --accesslog.filters.statuscodes=200-299,400-499,500-599
+      - --accesslog.fields.defaultmode=keep
+      - --accesslog.fields.headers.defaultmode=drop
+      - --accesslog.fields.headers.names.User-Agent=keep
+      - --accesslog.fields.headers.names.Referer=keep
+      - --accesslog.addinternals
+      - --experimental.fastProxy
+
+      - --certificatesresolvers.myresolver.acme.tlschallenge=true
+      - --certificatesresolvers.myresolver.acme.email=postmaster@example.com
+      - --certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json
+
+  auth:
+    image: wiremock/wiremock:latest
+    volumes:
+      - ./wiremock/mappings:/home/wiremock/mappings
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.auth.rule=Host(`auth.traefik.local`)
+      - traefik.http.services.auth.loadbalancer.server.port=8080
+      - traefik.http.routers.auth.tls=true
+    command:
+      - --verbose
+
+  echo:
+    image: traefik/whoami
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.echo.rule=Host(`echo.traefik.local`)
+      - traefik.http.routers.echo.tls=true
+      - traefik.http.routers.echo.middlewares=auth-forward
+      - traefik.http.middlewares.auth-forward.forwardauth.address=http://auth:8080/auth/validate
+      - traefik.http.middlewares.auth-forward.forwardauth.authResponseHeaders=X-Auth-User,X-Auth-Email,X-Auth-Role

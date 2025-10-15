@@ -12,15 +12,17 @@ services:
       - traefik.http.routers.traefik.service=api@internal
       - traefik.http.routers.traefik.tls
     command:
+      - --ping=true
+
       - --api.dashboard=true
       - --api.insecure=true
 
       - --entrypoints.http.address=:80
       - --entrypoints.http.http.redirections.entrypoint.to=https
       - --entrypoints.https.address=:443
+      - --entrypoints.https.http.tls=true
 
       - --providers.docker.defaultRule=Host(`{{ index .Labels "com.docker.compose.service"}}.{{ index .Labels "com.docker.compose.project"}}.traefik.local`) # work
-      - --providers.docker.exposedByDefault=true
 
       - --log.level=TRACE
       - --accesslog.filepath=/var/log/traefik/access.log
@@ -37,24 +39,52 @@ services:
       - --certificatesresolvers.myresolver.acme.email=postmaster@example.com
       - --certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json
 
-  auth:
-    image: wiremock/wiremock:latest
-    volumes:
-      - ./wiremock/mappings:/home/wiremock/mappings
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.auth.rule=Host(`auth.traefik.local`)
-      - traefik.http.services.auth.loadbalancer.server.port=8080
-      - traefik.http.routers.auth.tls=true
-    command:
-      - --verbose
+    healthcheck:
+      test: wget -qO- http://localhost:8080/ping
+      interval: 5s
+      timeout: 3s
+      start_period: 1s
+      start_interval: 1s
+      retries: 5
 
-  echo:
-    image: traefik/whoami
+  excalidraw:
+    image: excalidraw/excalidraw
     labels:
-      - traefik.enable=true
-      - traefik.http.routers.echo.rule=Host(`echo.traefik.local`)
-      - traefik.http.routers.echo.tls=true
-      - traefik.http.routers.echo.middlewares=auth-forward
-      - traefik.http.middlewares.auth-forward.forwardauth.address=http://auth:8080/auth/validate
-      - traefik.http.middlewares.auth-forward.forwardauth.authResponseHeaders=X-Auth-User,X-Auth-Email,X-Auth-Role
+      - traefik.http.routers.excalidraw.rule=Host(`excalidraw.traefik.local`)
+      - traefik.http.routers.excalidraw.middlewares=nginx-auth
+    healthcheck:
+      start_period: 2s
+      interval: 1s
+      timeout: 3s
+      retries: 10
+  nginx-auth:
+    image: nginx:alpine
+    labels:
+      - "traefik.http.middlewares.nginx-auth.forwardauth.address=http://nginx-auth"
+      - "traefik.http.middlewares.nginx-auth.forwardauth.authResponseHeaders=X-Forwarded-User"
+    configs:
+      - source: auth.conf
+        target: /etc/nginx/conf.d/default.conf
+      - source: admin_admin
+        target: /etc/nginx/.htpasswd
+
+configs:
+  admin_admin:
+    content: admin:$$apr1$$7itccb6U$$YChIYCSvsmd9qP3koW29Q.
+  auth.conf:
+    content: |
+      server {
+          listen 80;
+          server_name _;
+
+          location / {
+              auth_basic "Restricted Area";
+              auth_basic_user_file /etc/nginx/.htpasswd;
+
+              proxy_pass http://excalidraw;
+              proxy_set_header Host $$host;
+              proxy_set_header X-Real-IP $$remote_addr;
+              proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $$scheme;
+          }
+      }

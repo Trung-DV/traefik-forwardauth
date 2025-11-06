@@ -1,16 +1,30 @@
-# Traefik ForwardAuth with Nginx HTTP Basic Authentication
+# Traefik ForwardAuth Examples
 
-This project demonstrates a simple and effective authentication setup using Traefik's ForwardAuth middleware with an Nginx service providing HTTP Basic Authentication.
+This project provides examples of different authentication setups using Traefik's ForwardAuth middleware.
 
 ## Overview
+
+Forward authentication is a powerful feature in Traefik that delegates authentication decisions to an external service. This allows for flexible and robust authentication mechanisms without building them into your own services.
+
+All setups in this repository share a common architecture:
+- **Traefik** acts as the gateway and reverse proxy.
+- **Excalidraw** is used as an example service that requires authentication/SSO before it can be accessed.
+- A **third-party service** (like Nginx or Authentik) provides **external authentication**.
+
+This repository includes the following examples:
+
+- [Nginx HTTP Basic Authentication](./nginx)
+- Authentik (Coming Soon)
+
+## 1. Nginx HTTP Basic Authentication
+
+This example demonstrates a simple and effective authentication setup using an Nginx service providing HTTP Basic Authentication.
 
 The setup includes:
 - **Traefik** as a reverse proxy and load balancer.
 - **Nginx** as a lightweight, internal authentication service.
 - **Excalidraw** as an example protected service.
 - A straightforward authentication flow where Traefik uses Nginx to protect a service with a username and password.
-
-## Architecture
 
 ### System Components
 
@@ -72,85 +86,90 @@ graph TB
     class ForwardAuth middleware
 ```
 
-### Request Flow Sequence
+For more details on the Nginx example, see the [Nginx README](./nginx/README.md).
+
+## 2. Authentik with GitHub OAuth2
+
+This example demonstrates a comprehensive authentication solution using Authentik, a flexible open-source Identity Provider that supports SSO and social login.
+
+The setup includes:
+- **Traefik** as a reverse proxy and load balancer.
+- **Authentik** as a feature-rich identity provider supporting SSO and social login (e.g., GitHub, Google, etc.).
+- **Excalidraw** as an example service protected by Authentik.
+- A sophisticated authentication flow where users can log in using social providers like GitHub, and Traefik uses Authentik's embedded outpost to protect services.
+
+### System Components
 
 ```mermaid
-sequenceDiagram
-    participant Client
-    participant Traefik
-    participant NginxAuth as Nginx Auth (Internal)
-    participant Excalidraw
+graph TB
+   subgraph "Client Layer"
+       Client[Client/Browser]
+   end
 
-    Note over Client,Excalidraw: Initial Request (No Credentials)
+   subgraph "External Providers"
+       GitHub[GitHub OAuth]
+   end
+   
+   subgraph "Traefik Reverse Proxy"
+       Traefik[Traefik]
+       subgraph "Middlewares"
+           ForwardAuth[authentik Middleware]
+       end
+       subgraph "Routers"
+           ExcalidrawRouter[excalidraw.traefik.authentik.local]
+           AuthentikRouter[server.traefik.authentik.local]
+           TraefikRouter[traefik.authentik.local]
+       end
+   end
+   
+   subgraph "Services"
+       subgraph "Identity Provider"
+           Authentik[Authentik Service]
+       end
+       
+       subgraph "Protected Services"
+           Excalidraw[Excalidraw Service]
+       end
+       
+       subgraph "Management"
+           Dashboard[Traefik Dashboard]
+       end
+   end
 
-    Client->>Traefik: 1. GET https://excalidraw.traefik.local
-    Traefik->>NginxAuth: 2. Forward auth request
-    NginxAuth->>Traefik: 3. 401 Unauthorized
-    Traefik->>Client: 4. 401 Unauthorized (triggers browser prompt)
-
-    Note over Client: Browser displays login prompt for "Restricted Area"
-
-    Note over Client,Excalidraw: Authenticated Request
-
-    Client->>Traefik: 5. GET https://excalidraw.traefik.local<br/>(with 'Authorization: Basic ...' header)
-    Traefik->>NginxAuth: 6. Forward auth request (with credentials)
-    NginxAuth->>Traefik: 7. 204 No Content<br/>(with 'X-Forwarded-User: admin' header)
-    Traefik->>Excalidraw: 8. Forward original request<br/>(with 'X-Forwarded-User' header)
-    Excalidraw->>Traefik: 9. Service response
-    Traefik->>Client: 10. 200 OK + Response
+   %% Client connections
+   Client --> Traefik
+   
+   %% Traefik routing
+   Traefik --> ExcalidrawRouter
+   Traefik --> AuthentikRouter
+   Traefik --> TraefikRouter
+   
+   %% Router to service mapping
+   ExcalidrawRouter --> ForwardAuth
+   TraefikRouter --> Dashboard
+   
+   %% ForwardAuth flow
+   ForwardAuth -- "Forwards auth request to" --> Authentik
+   Authentik -- "If not logged in, redirects to login page" --> Client
+   Authentik -- "Authenticates against" --> GitHub
+   ForwardAuth -- "If auth succeeds, forwards original request to" --> Excalidraw
+   
+   AuthentikRouter --> Authentik
+   Client -- "Logs in via" --> Authentik
+   
+   %% Styling
+   classDef client fill:#e1f5fe
+   classDef traefik fill:#fff3e0
+   classDef service fill:#f3e5f5
+   classDef middleware fill:#fff9c4
+   classDef external fill:#e8f5e9
+   
+   class Client client
+   class Traefik,ExcalidrawRouter,AuthentikRouter,TraefikRouter traefik
+   class Authentik,Excalidraw,Dashboard service
+   class ForwardAuth middleware
+   class GitHub external
 ```
 
-### Flow Explanation
+For more details on the Authentik example, see the [Authentik README](./authentik/README.md).
 
-1.  **Initial Request**: The client makes a request to the protected service (`excalidraw.traefik.local`).
-2.  **ForwardAuth**: Traefik intercepts the request and, because of the `nginx-auth` middleware, sends an authentication request to the internal `nginx-auth` service.
-3.  **Authentication Challenge**: Since the initial request has no credentials, the Nginx service returns a `401 Unauthorized` response. Traefik forwards this to the client, causing the browser to display a username/password prompt.
-4.  **Authenticated Request**: The user enters their credentials (`admin`/`admin`). The browser sends the request again, this time with an `Authorization: Basic <credentials>` header.
-5.  **Validation**: Traefik again forwards the auth request to Nginx. Nginx validates the credentials against its configured `.htpasswd` file.
-6.  **Success and Forward**: Upon successful validation, Nginx returns a `204 No Content` status and adds the `X-Forwarded-User` header. Traefik receives this successful response and forwards the original client request to the `excalidraw` service, along with the `X-Forwarded-User` header.
-7.  **Final Response**: The `excalidraw` service responds, and Traefik passes the response back to the client.
-
-## User Experience
-
-1. **Login Required**: When first accessing the site, the browser will prompt for credentials.
-![Login Prompt](docs/require-login.png)
-
-2. **Authentication**: Enter the username and password (`admin`/`admin`).
-![Login](docs/login.png)
-
-3. **Access Granted**: After successful authentication, the user can access the protected Excalidraw service.
-![Logged In](docs/logged-in.png)
-
-## Services
-
-### 1. Traefik (Reverse Proxy)
-- **URL**: `https://traefik.local`
-- **Purpose**: The main reverse proxy and dashboard. It manages incoming traffic and coordinates with the authentication service.
-
-### 2. Nginx Auth Service
-- **Purpose**: Provides HTTP Basic Authentication internally for Traefik. It has no public URL. It validates credentials and returns a success or failure status to Traefik.
-- **Credentials**: The user is `admin` with password `admin`, as configured in `compose.yml`.
-
-### 3. Excalidraw Service (Protected)
-- **URL**: `https://excalidraw.traefik.local`
-- **Purpose**: An example service that is protected by the `nginx-auth` middleware. Access is only granted after successful authentication.
-
-## Quick Start
-
-1.  **Start the services:**
-    ```bash
-    docker compose up -d
-    ```
-
-2.  **Access the protected service:**
-    Open your browser and navigate to `https://excalidraw.traefik.local`. You will be prompted for a username and password.
-
-    Alternatively, use `curl`:
-    ```bash
-    # This will fail with a 401
-    curl https://excalidraw.traefik.local -k
-
-    # This will succeed
-    curl -u admin:admin https://excalidraw.traefik.local -k
-    ```
-    The `-u admin:admin` flag tells curl to use HTTP Basic Authentication.

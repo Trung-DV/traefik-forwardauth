@@ -1,0 +1,64 @@
+include:
+  - authentik.compose.yml
+
+services:
+  traefik:
+    image: traefik
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:z
+    labels:
+      - dev.orbstack.domains=*.traefik.authentik.local
+
+      - traefik.enable=true
+
+      - traefik.http.services.traefik.loadbalancer.server.port=443
+      - traefik.http.routers.traefik.rule=Host(`traefik.authentik.local`)
+      - traefik.http.routers.traefik.service=api@internal
+
+      - traefik.http.middlewares.fwauth.forwardauth.address=http://server:9000/outpost.goauthentik.io/auth/traefik
+      - traefik.http.middlewares.fwauth.forwardauth.authresponseheaders=X-authentik-username,X-authentik-groups,X-authentik-email,X-authentik-name,X-authentik-uid
+    command:
+      - --ping=true
+
+      - --api.dashboard=true
+
+      - --entrypoints.http.address=:80
+      - --entrypoints.http.http.redirections.entrypoint.to=https
+      - --entrypoints.https.address=:443
+      - --entrypoints.https.http.tls=true
+
+      - --providers.docker.defaultRule=Host(`{{ index .Labels "com.docker.compose.service"}}.traefik.authentik.local`) # work
+
+      - --log.level=TRACE
+      - --accesslog.filepath=/var/log/traefik/access.log
+      - --accesslog.format=json
+      - --accesslog.filters.statuscodes=200-299,400-499,500-599
+      - --accesslog.fields.defaultmode=keep
+      - --accesslog.fields.headers.defaultmode=drop
+      - --accesslog.fields.headers.names.User-Agent=keep
+      - --accesslog.fields.headers.names.Referer=keep
+      - --accesslog.addinternals
+      - --experimental.fastProxy
+
+      - --certificatesresolvers.myresolver.acme.tlschallenge=true
+      - --certificatesresolvers.myresolver.acme.email=postmaster@example.com
+      - --certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json
+
+    healthcheck:
+      test: wget -qO- http://localhost:8080/ping
+      interval: 5s
+      timeout: 3s
+      start_period: 1s
+      start_interval: 1s
+      retries: 5
+
+  excalidraw:
+    image: excalidraw/excalidraw
+    labels:
+      - traefik.http.routers.excalidraw.middlewares=fwauth
+    healthcheck:
+      start_period: 2s
+      interval: 1s
+      timeout: 3s
+      retries: 10
+
